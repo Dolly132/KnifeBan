@@ -9,7 +9,7 @@
 #include <clientprefs>
 #include <KnifeBan>
 
-#define PLUGIN_PREFIX "{fullred}[KnifeBan] {white}"
+#define PLUGIN_PREFIX "{deeppink}[KnifeBan]{indianred}"
 
 int g_iClientTargets[MAXPLAYERS+1] = { -1, ... };
 int g_iClientTargetsLength[MAXPLAYERS+1] = { -1, ... };
@@ -25,7 +25,6 @@ bool g_bKnifeModeEnabled;
 Handle g_hKnifeBanExpireTime[MAXPLAYERS+1] = {null, ...};
 
 char sPath[PLATFORM_MAX_PATH];
-char commands[][] =  { "sm_checkknifeban", "sm_checkkban", "sm_knifebanstatus", "sm_kbanstatus", "sm_kstatus" };
 
 ConVar g_cvDefaultLength;
 ConVar g_cvAddBanLength;
@@ -33,9 +32,9 @@ ConVar g_cvAddBanLength;
 public Plugin myinfo = 
 {
 	name = "KnifeBan",
-	author = "Dolly",
+	author = "Dolly, .Rushaway",
 	description = "Block knife damage of the knife banned player",
-	version = "2.2",
+	version = "2.3",
 	url = "https://nide.gg"
 }
 
@@ -54,14 +53,8 @@ public void OnPluginStart()
 	RegAdminCmd("sm_addkban", Command_AddKnifeBan, ADMFLAG_BAN);
 	RegAdminCmd("sm_koban", Command_AddKnifeBan, ADMFLAG_BAN);
 
-	for (int i = 0; i < sizeof(commands); i++)
-	{	
-		RegConsoleCmd(commands[i], Command_CheckKnifeBan);
-	}
-	
-	RegConsoleCmd("sm_ktime", Command_CheckKnifeBanTime);
-	RegConsoleCmd("sm_kbantime", Command_CheckKnifeBanTime);
-	RegConsoleCmd("sm_checkkbantime", Command_CheckKnifeBanTime);
+	RegConsoleCmd("sm_kstatus", Command_CheckKnifeBan);
+	RegConsoleCmd("sm_kbanstatus", Command_CheckKnifeBan);
 	
 	g_cvDefaultLength = CreateConVar("sm_knifeban_length", "30", "The Default length of time will be given incase no length found");
 	g_cvAddBanLength = CreateConVar("sm_knifeban_addban_length", "240", "The Maximume length for add knife ban command");
@@ -242,7 +235,7 @@ public Action KnifeBan_ExpireTimer(Handle timer, DataPack datapack)
 	
 	if(IsValidClient(client))
 	{
-		CPrintToChat(client, "%sYour Knife ban has been expired.", PLUGIN_PREFIX);
+		CPrintToChat(client, "%s {white}Your Knife ban has {green}expired.", PLUGIN_PREFIX);
 		DeletePlayerFromCFG(SteamID);
 	}
 	
@@ -282,18 +275,32 @@ public Action Command_KnifeBan(int client, int args)
 	if(args < 1)
 	{
 		DisplayKnifeBansListMenu(client);
-		CReplyToCommand(client, "%sUsage: sm_knifeban/sm_kban {green}<player> {yellow}<time> {red}<reason>{white}.", PLUGIN_PREFIX);
+		CReplyToCommand(client, "%s Usage: sm_kban/sm_knifeban <player> <duration> <reason>", PLUGIN_PREFIX);
 		return Plugin_Handled;
 	}
 	
-	char arg1[64], arg2[32], arg3[64], SteamID[32];
-	GetCmdArg(1, arg1, 64);
-	GetCmdArg(2, arg2, 32);
-	GetCmdArg(3, arg3, 64);
+	char Arguments[256], arg[50], s_time[20];
+	GetCmdArgString(Arguments, sizeof(Arguments));
 	
-	int target = FindTarget(client, arg1, false, false);
+	int len, next_len;
+	len = BreakString(Arguments, arg, sizeof(arg));
+	if(len == -1)
+    {
+        len = 0;
+        Arguments[0] = '\0';
+    }
 	
-	int time = StringToInt(arg2);
+	if((next_len = BreakString(Arguments[len], s_time, sizeof(s_time))) != -1)
+        len += next_len;
+	else
+    {
+        len = 0;
+        Arguments[0] = '\0';
+    }
+
+	int time = StringToInt(s_time);
+	int target = FindTarget(client, arg, false, false);
+	char SteamID[32];
 	
 	if(IsValidClient(target))
 	{	
@@ -302,7 +309,7 @@ public Action Command_KnifeBan(int client, int args)
 			if(!GetClientAuthId(target, AuthId_Steam2, SteamID, sizeof(SteamID)))
 			{
 				g_bIsClientKnifeBanned[target] = true;
-				CPrintToChatAll("%s{green}%N has knife banned {yellow}%N {white}temporarily.", PLUGIN_PREFIX, client, target);
+				CPrintToChatAll("%s {white}%N {red}Knife banned {white}%N {red}temporarily.", PLUGIN_PREFIX, client, target);
 				return Plugin_Handled;
 			}
 			else if(args < 2)
@@ -312,16 +319,28 @@ public Action Command_KnifeBan(int client, int args)
 			}
 			else if(args < 3)
 			{
-				KnifeBanClient(client, target, time);			
+				if(!CheckCommandAccess(client, "sm_somalia", ADMFLAG_RCON, true) && time == 0)
+				{	
+					KnifeBanClient(client, target, g_cvDefaultLength.IntValue);			
+					return Plugin_Handled;
+				}
+				
+				KnifeBanClient(client, target, time, "No Reason");
 				return Plugin_Handled;
 			}
 			
-			KnifeBanClient(client, target, time, arg3);
+			if(!CheckCommandAccess(client, "sm_somalia", ADMFLAG_RCON, true) && time == 0)
+			{	
+				KnifeBanClient(client, target, g_cvDefaultLength.IntValue, Arguments[len]);
+				return Plugin_Handled;
+			}
+			
+			KnifeBanClient(client, target, time, Arguments[len]);
 			return Plugin_Handled;
 		}
 		else
 		{
-			CReplyToCommand(client, "%s{green}%N {white}is already knife banned.", PLUGIN_PREFIX, target);
+			CReplyToCommand(client, "%s {white}%N {indianred}is already knife banned.", PLUGIN_PREFIX, target);
 			return Plugin_Handled;
 		}
 	}
@@ -334,15 +353,23 @@ public Action Command_KnifeUnBan(int client, int args)
 	if(args < 1)
 	{
 		DisplayKnifeBansListMenu(client);
-		CReplyToCommand(client, "%sUsage: sm_knifeunban/sm_kunban {green}<player> {yellow}<reason>{white}.", PLUGIN_PREFIX);
+		CReplyToCommand(client, "%s Usage: sm_kunban/sm_knifeunban <player> <reason>.", PLUGIN_PREFIX);
 		return Plugin_Handled;
 	}
 	
-	char arg1[32], arg2[64], SteamID[32], AdminSteamID[32];
-	GetCmdArg(1, arg1, 32);
-	GetCmdArg(2, arg2, 64);
+	char Arguments[256], arg[50];
+	GetCmdArgString(Arguments, sizeof(Arguments));
 	
-	int target = FindTarget(client, arg1, false, false);
+	int len;
+	len = BreakString(Arguments, arg, sizeof(arg));
+	if(len == -1)
+    {
+        len = 0;
+        Arguments[0] = '\0';
+    }
+
+	int target = FindTarget(client, arg, false, false);
+	char SteamID[32], AdminSteamID[32];
 	
 	if(IsValidClient(target))
 	{
@@ -354,32 +381,32 @@ public Action Command_KnifeUnBan(int client, int args)
 			if(!GetClientAuthId(target, AuthId_Steam2, SteamID, sizeof(SteamID)))
 			{
 				g_bIsClientKnifeBanned[target] = false;
-				CPrintToChatAll("%s{green}%N {white}has knife unbanned {green}%N.", PLUGIN_PREFIX, client, target);
+				CPrintToChatAll("%s {white}%N {green}Knife unbanned {white}%N.", PLUGIN_PREFIX, client, target);
 				return Plugin_Handled;
 			}
 			
 			else if(!CheckKnifeBanAuthor(client, SteamID, AdminSteamID))
 			{
-				CReplyToCommand(client, "%sYou cannot unban other admins' KBans.", PLUGIN_PREFIX);
+				CReplyToCommand(client, "%s You cannot unban other admins KBans.", PLUGIN_PREFIX);
 				return Plugin_Handled;
 			}
 			
 			else if(args < 2)
 			{
 				KnifeUnBanClient(client, target);
-				CPrintToChatAll("%s{green}%N {white}has knife unbanned {green}%N {white}(reason {yellow}No Reason{white}).", PLUGIN_PREFIX, client, target);
+				CPrintToChatAll("%s {white}%N {green}Knife unbanned {white}%N. \n%s Reason: No Reason.", PLUGIN_PREFIX, client, target, PLUGIN_PREFIX);
 				return Plugin_Handled;
 			}
 			else if(args >= 2)
 			{
-				KnifeUnBanClient(client, target, arg2);
-				CPrintToChatAll("%s{green}%N {white}has knife unbanned {green}%N {white}(reason {yellow}%s{white}).", PLUGIN_PREFIX, client, target, arg2);
+				KnifeUnBanClient(client, target, Arguments[len]);
+				CPrintToChatAll("%s {white}%N {green}Knife unbanned {white}%N. \n%s Reason: %s.", PLUGIN_PREFIX, client, target, PLUGIN_PREFIX, Arguments[len]);
 				return Plugin_Handled;
 			}
 		}
 		else
 		{
-			CReplyToCommand(client, "%sThe specified player doesn't have any current knife ban progress.", PLUGIN_PREFIX);
+			CReplyToCommand(client, "%s The specified player doesn't have any current knife ban progress.", PLUGIN_PREFIX);
 			return Plugin_Handled;
 		}
 	}
@@ -412,16 +439,30 @@ public Action Command_CheckKnifeBan(int client, int args)
 	
 	if(!g_bIsClientKnifeBanned[client])
 	{
-		CReplyToCommand(client, "%sYou don't have any active knife ban progress.", PLUGIN_PREFIX);
+		CReplyToCommand(client, "%s {green}You are currently not Knife banned.", PLUGIN_PREFIX);
 		return Plugin_Handled;
 	}
 	else if(g_bIsClientKnifeBanned[client])
 	{
 		CreateKv();
 		if(Kv.JumpToKey(SteamID))
+		{
+			int time = Kv.GetNum("TimeStamp");
+			int length = Kv.GetNum("Length");
+			int totaltime = ((length * 60) + time);
+			int lefttime = totaltime - GetTime();
+			
+			char TimeLeft[32];
+			CheckPlayerExpireTime(lefttime, TimeLeft, sizeof(TimeLeft));				
+			
 			DisplayCheckKnifeBanMenu(client);
+			CReplyToCommand(client, "%s Your Knife Ban expires {green}in %s.", PLUGIN_PREFIX, TimeLeft);
+		}
 		else
-			CReplyToCommand(client, "%sYou are currently knife banned temporarily until this map ends.", PLUGIN_PREFIX);
+		{
+			//DisplayCheckKnifeBanMenu(client);
+			CReplyToCommand(client, "%s You are currently knife banned temporarily until this map end.", PLUGIN_PREFIX);
+		}
 		
 		delete Kv;
 		return Plugin_Handled;
@@ -434,100 +475,76 @@ public Action Command_AddKnifeBan(int client, int args)
 {
 	if(args < 3)
 	{
-		CReplyToCommand(client, "%sUsage: sm_addknifeban/sm_addkban/sm_koban {green}<steamid> {yellow}<time> {purple}<reason>", PLUGIN_PREFIX);
+		CReplyToCommand(client, "%s Usage: sm_koban/sm_addknifeban/sm_addkban \"<steamid>\" <time> <reason>", PLUGIN_PREFIX);
 		return Plugin_Handled;
 	}
 
 	char AdminSteamID[32];
 	GetClientAuthId(client, AuthId_Steam2, AdminSteamID, sizeof(AdminSteamID));
 	
-	char arg1[64], arg2[20], arg3[64];
-	GetCmdArg(1, arg1, 64);
-	GetCmdArg(2, arg2, 20);
-	GetCmdArg(3, arg3, 64);
+	char Arguments[256], arg[50], s_time[20];
+	GetCmdArgString(Arguments, sizeof(Arguments));
 	
-	int time = StringToInt(arg2);
+	int len, next_len;
+	len = BreakString(Arguments, arg, sizeof(arg));
+	if(len == -1)
+    {
+        len = 0;
+        Arguments[0] = '\0';
+    }
 	
-	if(arg1[7] != ':')
+	if((next_len = BreakString(Arguments[len], s_time, sizeof(s_time))) != -1)
+        len += next_len;
+	else
+    {
+        len = 0;
+        Arguments[0] = '\0';
+    }
+	
+	int time = StringToInt(s_time);
+	
+	if(arg[7] != ':')
 	{
-		CReplyToCommand(client, "%sPlease type the SteamID between quotes.", PLUGIN_PREFIX);
+		CReplyToCommand(client, "%s Please type the SteamID between quotes.", PLUGIN_PREFIX);
 		return Plugin_Handled;
 	}
 	
 	CreateKv();
-	if(Kv.JumpToKey(arg1))
+	if(Kv.JumpToKey(arg))
 	{
-		CReplyToCommand(client, "%sThe specified steamid is already knife banned", PLUGIN_PREFIX);
+		CReplyToCommand(client, "%s The specified steamid is already knife banned", PLUGIN_PREFIX);
 		return Plugin_Handled;
 	}
 	else
 	{
 		if(time <= g_cvAddBanLength.IntValue)
 		{
-			if(!IsSteamIDInGame(arg1))
+			if(!IsSteamIDInGame(arg))
 			{
 				char sAdminName[64], date[32], sCurrentMap[64];
 				GetClientName(client, sAdminName, 64);
-				FormatTime(date, 32, "%c", GetTime());
+				FormatTime(date, 32, "%d/%m/%y @ %r", GetTime());
 				GetCurrentMap(sCurrentMap, 64);
 				
-				AddPlayerToCFG(arg1, AdminSteamID, "UnKnown", sAdminName, arg3, date, sCurrentMap, time);
-				CReplyToCommand(client, "%sSuccessfully added knife ban for {green}%s{white} for %d minutes", PLUGIN_PREFIX, arg1, time);
-				LogAction(client, -1, "\"%L\" has added a knife ban to CFG for \"%s\" for \"%d\" minutes.", client, arg1, time);
+				AddPlayerToCFG(arg, AdminSteamID, "UnKnown", sAdminName, Arguments[len], date, sCurrentMap, time);
+				CReplyToCommand(client, "%s {green}Successfully added knife ban for {white}%s{indianred} for {red}%d minutes", PLUGIN_PREFIX, arg, time);
+				LogAction(client, -1, "\"%L\" has added a knife ban to CFG for \"%s\" for \"%d\" minutes.", client, arg, time);
 				return Plugin_Handled;
 			}
 			else
 			{
-				CReplyToCommand(client, "%sThe specified steamid is alraedy online on the server, please use {green}sm_knifeban{white} instead.", PLUGIN_PREFIX);
+				CReplyToCommand(client, "%s The specified steamid is alraedy online on the server, please use {green}sm_knifeban {indianred}instead.", PLUGIN_PREFIX);
 				return Plugin_Handled;
 			}
 		}
 		else if(time > g_cvAddBanLength.IntValue)
 		{
-			CReplyToCommand(client, "%sMaximume length for adding knife ban is %d", PLUGIN_PREFIX, g_cvAddBanLength.IntValue);
+			CReplyToCommand(client, "%s Maximume length for adding knife ban is {green}%d", PLUGIN_PREFIX, g_cvAddBanLength.IntValue);
 			return Plugin_Handled;
 		}
 	}
 	delete Kv;
 	
-	return Plugin_Handled;
-}
-	
-public Action Command_CheckKnifeBanTime(int client, int args)
-{
-	if(!client)
-	{
-		ReplyToCommand(client, "Cannot use this command on server rcon");
-		return Plugin_Handled;
-	}
-	
-	char SteamID[32];
-	GetClientAuthId(client, AuthId_Steam2, SteamID, sizeof(SteamID));
-	
-	if(g_bIsClientKnifeBanned[client])
-	{
-		CreateKv();
-		if(Kv.JumpToKey(SteamID))
-		{
-			int time = Kv.GetNum("TimeStamp");
-			int length = Kv.GetNum("Length");
-			int totaltime = ((length * 60) + time);
-			int lefttime = totaltime - GetTime();
-			
-			CReplyToCommand(client, "%sYour Knife Ban expires in {green}%d{white} seconds.", PLUGIN_PREFIX, lefttime);
-			return Plugin_Handled;
-		}
-		else
-			CReplyToCommand(client, "%sYour Knife Ban will expire in the end of this map.", PLUGIN_PREFIX);
-		
-		delete Kv;
-	}
-	else
-	{
-		CReplyToCommand(client, "%sYou don't have any active knife ban.", PLUGIN_PREFIX);
-		return Plugin_Handled;
-	}
-
 	return Plugin_Handled;
 }
 	
@@ -550,10 +567,10 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 					KnifeBanClient(client, GetClientOfUserId(g_iClientTargets[client]), g_iClientTargetsLength[client], buffer);
 				}
 				else
-					CPrintToChat(client, "%sPlayer is already knife banned.", PLUGIN_PREFIX);
+					CPrintToChat(client, "%s Player is already knife banned.", PLUGIN_PREFIX);
 			}
 			else
-				CPrintToChat(client, "%sPlayer has left the game.", PLUGIN_PREFIX);
+				CPrintToChat(client, "%s Player has left the game.", PLUGIN_PREFIX);
 			
 			g_bIsClientTypingReason[client] = false;
 			return Plugin_Stop;
@@ -624,14 +641,14 @@ public int Menu_KnifeBanClients(Menu menu, MenuAction action, int param1, int pa
 				}
 				else
 				{
-					CPrintToChat(param1, "%sPlayer is already knife banned", PLUGIN_PREFIX);
+					CPrintToChat(param1, "%s Player is already knife banned", PLUGIN_PREFIX);
 					DisplayKnifeBanClientsMenu(param1);
 				}
 			}
 			else
 			{
 				DisplayKnifeBanClientsMenu(param1);
-				CPrintToChat(param1, "%sPlayer either has invalid steamid or left the game.", PLUGIN_PREFIX);
+				CPrintToChat(param1, "%s Player either has invalid steamid or left the game.", PLUGIN_PREFIX);
 			}
 		}
 	}
@@ -698,14 +715,14 @@ public int Menu_Reasons(Menu menu, MenuAction action, int param1, int param2)
 				{
 					if(!g_bIsClientKnifeBanned[GetClientOfUserId(g_iClientTargets[param1])])
 					{
-						CPrintToChat(param1, "%sPlease type the reason in chat.", PLUGIN_PREFIX);
+						CPrintToChat(param1, "%s Please type the reason in chat.", PLUGIN_PREFIX);
 						g_bIsClientTypingReason[param1] = true;
 					}
 					else
-						CPrintToChat(param1, "%sPlayer is already knife banned.", PLUGIN_PREFIX);
+						CPrintToChat(param1, "%s Player is already knife banned.", PLUGIN_PREFIX);
 				}
 				else
-					CPrintToChat(param1, "%sPlayer has left the game.", PLUGIN_PREFIX);
+					CPrintToChat(param1, "%s Player has left the game.", PLUGIN_PREFIX);
 			}
 			else
 			{
@@ -801,7 +818,7 @@ public int Menu_ActionsAndDetailsAll(Menu menu, MenuAction action, int param1, i
 			menu.GetItem(param2, buffer, sizeof(buffer));
 			
 			DeletePlayerFromCFG(buffer);
-			CPrintToChat(param1, "%sSuccessfully removed knife ban for {yellow}%s.", PLUGIN_PREFIX, buffer);
+			CPrintToChat(param1, "%s {green}Successfully removed knife ban for {white}%s.", PLUGIN_PREFIX, buffer);
 			if(!IsSteamIDInGame(buffer))
 			{
 				LogAction(param1, -1, "[Knife Ban] \"%L\" has knife unbanned player with (\"%s\") (reason No Reason)", param1, buffer);
@@ -812,7 +829,7 @@ public int Menu_ActionsAndDetailsAll(Menu menu, MenuAction action, int param1, i
 				if(g_bIsClientKnifeBanned[target])
 				{
 					LogAction(param1, -1, "[Knife Ban] \"%L\" has knife unbanned player with (\"%s\") (PLAYER IS IN GAME)(reason No Reason)", param1, buffer);
-					CPrintToChatAll("%s{green}%N has knife unbanned {yellow}%N {green}(reason No Reason{white}).", PLUGIN_PREFIX, param1, target);
+					CPrintToChatAll("%s {white}%N {green}Knife unbanned {white}%N. \n%s Reason: No Reason.", PLUGIN_PREFIX, param1, target, PLUGIN_PREFIX);
 					g_bIsClientKnifeBanned[target] = false;
 					g_hKnifeBanExpireTime[target] = null;
 				}
@@ -856,9 +873,9 @@ public int Menu_ActionsAndDetailsCurrent(Menu menu, MenuAction action, int param
 				
 				g_bIsClientKnifeBanned[target] = false;
 				
-				CPrintToChat(param1, "%sSuccessfully removed knife ban from {yellow}%s", PLUGIN_PREFIX, SteamID);
-				CPrintToChatAll("%s{green}%N has knife unbanned {yellow}%N {green}(reason No Reason{white}).", PLUGIN_PREFIX, param1, target);
-				LogAction(param1, target, "[Knife Ban] \"%L\" has knife unbanned \"%L\" (reason No Reason)", param1, target);
+				CPrintToChat(param1, "%s {green}Successfully removed knife ban for {white}%s.", PLUGIN_PREFIX, SteamID);
+				CPrintToChatAll("%s {white}%N {green}Knife unbanned {white}%N. \n%s Reason: No Reason.", PLUGIN_PREFIX, param1, target, PLUGIN_PREFIX);
+				LogAction(param1, target, "[Knife Ban] \"%L\" has knife unbanned \"%L\" (reason: No Reason)", param1, target);
 			}
 				
 			DisplayCurrentKnifeBansMenu(param1);
@@ -917,13 +934,13 @@ public int Menu_OwnKnifeBansActions(Menu menu, MenuAction action, int param1, in
 				if(IsValidClient(target))
 				{
 					KnifeUnBanClient(param1, target, "No Reason");
-					CPrintToChatAll("%s{green}%N has knife unbanned {white}%N {green}({white}reason {green}No Reason)", PLUGIN_PREFIX, param1, target);
+					CPrintToChatAll("%s {white}%N {green}Knife unbanned {white}%N. \n%s Reason: No Reason.", PLUGIN_PREFIX, param1, target, PLUGIN_PREFIX);
 				}
 			}
 			else
 			{
 				DeletePlayerFromCFG(buffer);
-				CPrintToChat(param1, "%sSuccessfully removed knife ban from {green}%s.", PLUGIN_PREFIX, buffer);
+				CPrintToChat(param1, "%s {green}Successfully removed knife ban for {white}%s.", PLUGIN_PREFIX, buffer);
 			}
 			
 			DisplayOwnKnifeBansMenu(param1);
@@ -951,9 +968,9 @@ stock void DisplayKnifeBansListMenu(int client)
 	
 	menu.AddItem("0", "KBan a Player");
 	menu.AddItem("1", "", ITEMDRAW_SPACER);
-	menu.AddItem("2", "Online players with active KBan");
-	menu.AddItem("3", "Your Own KBans that are active");
-	menu.AddItem("4", "Full BanList of active KBan", CheckCommandAccess(client, "sm_somalia", ADMFLAG_RCON, true) ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
+	menu.AddItem("2", "Online KBanned");
+	menu.AddItem("3", "KBans you made");
+	menu.AddItem("4", "Full KBan BanList", CheckCommandAccess(client, "sm_koban", ADMFLAG_RCON, true) ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
 	
 	menu.ExitBackButton = true;
 	menu.Display(client, MENU_TIME_FOREVER);
@@ -979,7 +996,7 @@ stock void DisplayKnifeBanClientsMenu(int client)
 		}
 	}
 			
-	menu.Display(client, 100);
+	menu.Display(client, MENU_TIME_FOREVER);
 }
 
 stock void DisplayLengthsMenu(int client)
@@ -987,9 +1004,10 @@ stock void DisplayLengthsMenu(int client)
 	Menu menu = new Menu(Menu_KnifeBanLengths);
 	menu.SetTitle("[KnifeBan] KBan Duration");
 	
+	menu.AddItem("0", "Permanent", CheckCommandAccess(client, "sm_koban", ADMFLAG_RCON, true) ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
 	menu.AddItem("-1", "Session");
 	
-	for(int i = 15; i >= 15 && i < 9999999; i++)
+	for(int i = 15; i >= 15 && i < 241920; i++)
 	{
 		if(i == 15 || i == 30 || i == 45)
 		{
@@ -998,7 +1016,7 @@ stock void DisplayLengthsMenu(int client)
 			Format(text, sizeof(text), "%d Minutes", i);
 			menu.AddItem(buffer, text);
 		}
-		else if(i == 60 || i == 120 || i == 240 || i == 480)
+		else if(i == 60 || i == 120 || i == 240 || i == 480 || i == 720)
 		{
 			char buffer[32], text[32];
 			IntToString(i, buffer, sizeof(buffer));
@@ -1032,10 +1050,8 @@ stock void DisplayLengthsMenu(int client)
 		}
 	}
 	
-	menu.AddItem("0", "Permanent");
-	
 	menu.ExitBackButton = true;
-	menu.Display(client, 100);
+	menu.Display(client, MENU_TIME_FOREVER);
 }
 
 stock void DisplayReasonsMenu(int client)
@@ -1060,7 +1076,7 @@ stock void DisplayReasonsMenu(int client)
 	menu.AddItem("4", "Custom Reason");
 	
 	menu.ExitBackButton = true;
-	menu.Display(client, 100);
+	menu.Display(client, MENU_TIME_FOREVER);
 }
 
 stock void DisplayCurrentKnifeBansMenu(int client)
@@ -1088,13 +1104,13 @@ stock void DisplayCurrentKnifeBansMenu(int client)
 		menu.AddItem("", "No KBan", ITEMDRAW_DISABLED);
 	
 	menu.ExitBackButton = true;
-	menu.Display(client, 32);
+	menu.Display(client, MENU_TIME_FOREVER);
 }
 
 stock void DisplayAllKnifeBansMenu(int client)
 {
 	Menu menu = new Menu(Menu_AllKnifeBans);
-	menu.SetTitle("[KnifeBan] Active BanList");
+	menu.SetTitle("[KnifeBan] Full KBan BanList");
 	
 	CreateKv();
 	if(!Kv.GotoFirstSubKey())
@@ -1118,7 +1134,7 @@ stock void DisplayAllKnifeBansMenu(int client)
 	delete Kv;
 	
 	menu.ExitBackButton = true;
-	menu.Display(client, 32);
+	menu.Display(client, MENU_TIME_FOREVER);
 }
 	
 stock void DisplayOwnKnifeBansMenu(int client)
@@ -1143,13 +1159,9 @@ stock void DisplayOwnKnifeBansMenu(int client)
 				if(StrEqual(AdminSteamID, sSteamID))
 				{
 					if(IsSteamIDInGame(SteamID))
-					{	
 						Format(buffer, sizeof(buffer), "%s (ONLINE)", sName);
-					}
 					else
-					{
-						Format(buffer, sizeof(buffer), "%s  %s (OFFLINE)", sName, SteamID);
-					}
+						Format(buffer, sizeof(buffer), "%s  [%s] (OFFLINE)", sName, SteamID);
 						
 					menu.AddItem(SteamID, buffer);
 				}
@@ -1160,71 +1172,68 @@ stock void DisplayOwnKnifeBansMenu(int client)
 		delete Kv;
 	}
 	else if(GetAdminOwnKnifeBans(client, sSteamID) <= 0)
-	{
 		menu.AddItem("", "No KBan", ITEMDRAW_DISABLED);
-	}
 	
 	menu.ExitBackButton = true;
-	menu.Display(client, 32);
+	menu.Display(client, MENU_TIME_FOREVER);
 }
 
 stock void DisplayOwnKnifeBansActions(int client, const char[] SteamID)
 {
 	Menu menu = new Menu(Menu_OwnKnifeBansActions);
 	char title[65];
-	Format(title, sizeof(title), "[KnifeBan] Do actions on %s", SteamID);
+	Format(title, sizeof(title), "[KnifeBan] KBan Info: %s", SteamID);
 	menu.SetTitle(title);
 	
 	CreateKv();
-	char sName[MAX_NAME_LENGTH], sAdminName[MAX_NAME_LENGTH], sReason[128], date[32], sCurrentMap[PLATFORM_MAX_PATH];
-	char NameBuffer[MAX_NAME_LENGTH+64], AdminNameBuffer[MAX_NAME_LENGTH+64], ReasonBuffer[150], LengthBuffer[20], DateBuffer[32], MapBuffer[PLATFORM_MAX_PATH+64], TimeLeftBuffer[64], sLengthEx[64];
+	char sName[MAX_NAME_LENGTH], sReason[128], date[128], sCurrentMap[PLATFORM_MAX_PATH];
+	char NameBuffer[MAX_NAME_LENGTH+64], ReasonBuffer[150], LengthBuffer[64], DateBuffer[160], MapBuffer[PLATFORM_MAX_PATH+64], TimeLeftBuffer[64], sLengthEx[64];
 
 	int ilength;
 	
 	Kv.JumpToKey(SteamID, true);
 	Kv.GetString("Name", sName, sizeof(sName));
-	Kv.GetString("Admin Name", sAdminName, sizeof(sAdminName));
 	Kv.GetString("Reason", sReason, sizeof(sReason));
 	Kv.GetString("Date", date, sizeof(date));
 	Kv.GetString("Map", sCurrentMap, sizeof(sCurrentMap));
-	int time = Kv.GetNum("TimeStamp");
 	Kv.GetString("LengthEx", sLengthEx, sizeof(sLengthEx));
 	if(StrEqual(sLengthEx, "Permanent"))
-	{
-		Format(LengthBuffer, sizeof(LengthBuffer), "Length : Permanent");
-	}
+		Format(LengthBuffer, sizeof(LengthBuffer), "Duration : Permanent");
 	else
 	{
 		ilength = Kv.GetNum("Length");
-		Format(LengthBuffer, sizeof(LengthBuffer), "Length : %d minutes", ilength);
+		Format(LengthBuffer, sizeof(LengthBuffer), "Duration : %d Minutes", ilength);
 	}
-	
-	int totaltime = ((ilength * 60) + time);
+
+	int time = Kv.GetNum("TimeStamp");
+	int length = Kv.GetNum("Length");
+	int totaltime = ((length * 60) + time);
 	int lefttime = totaltime - GetTime();
+
+	char TimeLeft[32];
+	CheckPlayerExpireTime(lefttime, TimeLeft, sizeof(TimeLeft));
 			
-	Format(NameBuffer, sizeof(NameBuffer), "Player Name : %s", sName);
-	Format(AdminNameBuffer, sizeof(AdminNameBuffer), "Admin Name : %s", sAdminName);
+	Format(NameBuffer, sizeof(NameBuffer), "Player : %s", sName);
 	Format(ReasonBuffer, sizeof(ReasonBuffer), "Reason : %s", sReason);
-	Format(DateBuffer, sizeof(DateBuffer), "Date : %s", date);
-	Format(MapBuffer, sizeof(MapBuffer), "On Map : %s", sCurrentMap);
-	Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire Time Left: %d", lefttime);
+	Format(DateBuffer, sizeof(DateBuffer), "Issued : %s", date);
+	Format(MapBuffer, sizeof(MapBuffer), "Map : %s", sCurrentMap);
+	if(StrEqual(sLengthEx, "Permanent"))
+		Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire : Never");
+	else
+		Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire in: %s", TimeLeft);
 			
-	menu.AddItem(SteamID, "Knife UnBan");
 	menu.AddItem("", NameBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", AdminNameBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", ReasonBuffer, ITEMDRAW_DISABLED);
 	menu.AddItem("", LengthBuffer, ITEMDRAW_DISABLED);
 	menu.AddItem("", DateBuffer, ITEMDRAW_DISABLED);
+	menu.AddItem("", TimeLeftBuffer, ITEMDRAW_DISABLED);
+	menu.AddItem("", ReasonBuffer, ITEMDRAW_DISABLED);
 	menu.AddItem("", MapBuffer, ITEMDRAW_DISABLED);
-	if(!StrEqual(sLengthEx, "Permanent"))
-	{
-		menu.AddItem("", TimeLeftBuffer, ITEMDRAW_DISABLED);
-	}
-	
+	menu.AddItem(SteamID, "Knife UnBan");
+
 	delete Kv;
 	
 	menu.ExitBackButton = true;
-	menu.Display(client, 32);
+	menu.Display(client, MENU_TIME_FOREVER);
 }
 
 stock void ShowActionsAndDetailsForAll(int client, const char[] sSteamID)
@@ -1236,55 +1245,61 @@ stock void ShowActionsAndDetailsForAll(int client, const char[] sSteamID)
 	menu.SetTitle(sTitle);
 	
 	CreateKv();
-	char sName[MAX_NAME_LENGTH], sAdminName[MAX_NAME_LENGTH], sReason[128], date[32], sCurrentMap[PLATFORM_MAX_PATH];
-	char NameBuffer[MAX_NAME_LENGTH+64], AdminNameBuffer[MAX_NAME_LENGTH+64], ReasonBuffer[150], LengthBuffer[20], DateBuffer[32], MapBuffer[PLATFORM_MAX_PATH+64], TimeLeftBuffer[64], sLengthEx[64];
+	char sName[MAX_NAME_LENGTH], sAdminName[MAX_NAME_LENGTH], AdminSteamID[32], sReason[128], date[128], sCurrentMap[PLATFORM_MAX_PATH];
+	char NameBuffer[MAX_NAME_LENGTH+64], AdminNameBuffer[MAX_NAME_LENGTH+64], ReasonBuffer[150], LengthBuffer[64], DateBuffer[160], MapBuffer[PLATFORM_MAX_PATH+64], TimeLeftBuffer[64], sLengthEx[64];
 
 	int ilength;
 	
-	Kv.JumpToKey(sSteamID, true);
-	Kv.GetString("Name", sName, sizeof(sName));
-	Kv.GetString("Admin Name", sAdminName, sizeof(sAdminName));
-	Kv.GetString("Reason", sReason, sizeof(sReason));
-	Kv.GetString("Date", date, sizeof(date));
-	Kv.GetString("Map", sCurrentMap, sizeof(sCurrentMap));
-	int time = Kv.GetNum("TimeStamp");
-	Kv.GetString("LengthEx", sLengthEx, sizeof(sLengthEx));
-	if(StrEqual(sLengthEx, "Permanent"))
+	if(Kv.JumpToKey(sSteamID))
 	{
-		Format(LengthBuffer, sizeof(LengthBuffer), "Length : Permanent");
-	}
-	else
-	{
-		ilength = Kv.GetNum("Length");
-		Format(LengthBuffer, sizeof(LengthBuffer), "Length : %d minutes", ilength);
-	}
-	
-	int totaltime = ((ilength * 60) + time);
-	int lefttime = totaltime - GetTime();
-			
-	Format(NameBuffer, sizeof(NameBuffer), "Player Name : %s", sName);
-	Format(AdminNameBuffer, sizeof(AdminNameBuffer), "Admin Name : %s", sAdminName);
-	Format(ReasonBuffer, sizeof(ReasonBuffer), "Reason : %s", sReason);
-	Format(DateBuffer, sizeof(DateBuffer), "Date : %s", date);
-	Format(MapBuffer, sizeof(MapBuffer), "On Map : %s", sCurrentMap);
-	Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire Time Left: %d", lefttime);
-			
-	menu.AddItem(sSteamID, "Knife UnBan");
-	menu.AddItem("", NameBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", AdminNameBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", ReasonBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", LengthBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", DateBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", MapBuffer, ITEMDRAW_DISABLED);
-	if(!StrEqual(sLengthEx, "Permanent"))
-	{
+		Kv.GetString("Name", sName, sizeof(sName));
+		Kv.GetString("Admin Name", sAdminName, sizeof(sAdminName));
+		Kv.GetString("AdminSteamID", AdminSteamID, sizeof(AdminSteamID));
+		Kv.GetString("Reason", sReason, sizeof(sReason));
+		Kv.GetString("Date", date, sizeof(date));
+		Kv.GetString("Map", sCurrentMap, sizeof(sCurrentMap));
+
+		Kv.GetString("LengthEx", sLengthEx, sizeof(sLengthEx));
+		if(StrEqual(sLengthEx, "Permanent"))
+			Format(LengthBuffer, sizeof(LengthBuffer), "Duration : Permanent");
+		else
+		{
+			ilength = Kv.GetNum("Length");
+			Format(LengthBuffer, sizeof(LengthBuffer), "Duration : %d Minutes", ilength);
+		}
+		
+		int time = Kv.GetNum("TimeStamp");
+		int length = Kv.GetNum("Length");
+		int totaltime = ((length * 60) + time);
+		int lefttime = totaltime - GetTime();
+		
+		char TimeLeft[32];
+		CheckPlayerExpireTime(lefttime, TimeLeft, sizeof(TimeLeft));
+
+		Format(NameBuffer, sizeof(NameBuffer), "Player : %s", sName);
+		Format(AdminNameBuffer, sizeof(AdminNameBuffer), "Admin : %s (%s)", sAdminName, AdminSteamID);
+		Format(ReasonBuffer, sizeof(ReasonBuffer), "Reason : %s", sReason);
+		Format(DateBuffer, sizeof(DateBuffer), "Issued : %s", date);
+		Format(MapBuffer, sizeof(MapBuffer), "Map : %s", sCurrentMap);
+		if(StrEqual(sLengthEx, "Permanent"))
+			Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire : Never");
+		else
+			Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire in: %s", TimeLeft);
+				
+		menu.AddItem("", NameBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", AdminNameBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", LengthBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", DateBuffer, ITEMDRAW_DISABLED);
 		menu.AddItem("", TimeLeftBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", ReasonBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", MapBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem(sSteamID, "Knife UnBan");
 	}
 	
 	delete Kv;
 	
 	menu.ExitBackButton = true;
-	menu.Display(client, 32);
+	menu.Display(client, MENU_TIME_FOREVER);
 }
 
 stock void ShowActionsAndDetailsForCurrent(int client, int target, const char[] sSteamID)
@@ -1299,8 +1314,8 @@ stock void ShowActionsAndDetailsForCurrent(int client, int target, const char[] 
 	menu.SetTitle(sTitle);
 	
 	CreateKv();
-	char sBuffer[32], sName[MAX_NAME_LENGTH], sAdminName[MAX_NAME_LENGTH], sReason[128], date[32], sCurrentMap[PLATFORM_MAX_PATH];
-	char NameBuffer[MAX_NAME_LENGTH+64], AdminNameBuffer[MAX_NAME_LENGTH+64], ReasonBuffer[150], LengthBuffer[20], DateBuffer[32], MapBuffer[PLATFORM_MAX_PATH+64], TimeLeftBuffer[64], sLengthEx[64];
+	char sBuffer[32], sName[MAX_NAME_LENGTH], sAdminName[MAX_NAME_LENGTH], AdminSteamID[32], sReason[128], date[128], sCurrentMap[PLATFORM_MAX_PATH];
+	char NameBuffer[MAX_NAME_LENGTH+64], AdminNameBuffer[MAX_NAME_LENGTH+64], ReasonBuffer[150], LengthBuffer[64], DateBuffer[160], MapBuffer[PLATFORM_MAX_PATH+64], TimeLeftBuffer[64], sLengthEx[64];
 	
 	int userid = GetClientUserId(target);
 	IntToString(userid, sBuffer, 32);
@@ -1311,54 +1326,62 @@ stock void ShowActionsAndDetailsForCurrent(int client, int target, const char[] 
 	{
 		Kv.GetString("Name", sName, sizeof(sName));
 		Kv.GetString("Admin Name", sAdminName, sizeof(sAdminName));
+		Kv.GetString("AdminSteamID", AdminSteamID, sizeof(AdminSteamID));
 		Kv.GetString("Reason", sReason, sizeof(sReason));
 		Kv.GetString("Date", date, sizeof(date));
 		Kv.GetString("Map", sCurrentMap, sizeof(sCurrentMap));
-		int time = Kv.GetNum("TimeStamp");
 		Kv.GetString("LengthEx", sLengthEx, sizeof(sLengthEx));
 		if(StrEqual(sLengthEx, "Permanent"))
-		{
-			Format(LengthBuffer, sizeof(LengthBuffer), "Length : Permanent");
-		}
+			Format(LengthBuffer, sizeof(LengthBuffer), "Duration : Permanent");
 		else
 		{
 			ilength = Kv.GetNum("Length");
-			Format(LengthBuffer, sizeof(LengthBuffer), "Length : %d minutes", ilength);
+			Format(LengthBuffer, sizeof(LengthBuffer), "Duration : %d Minutes", ilength);
 		}
 		
-		int totaltime = ((ilength * 60) + time);
+		int time = Kv.GetNum("TimeStamp");
+		int length = Kv.GetNum("Length");
+		int totaltime = ((length * 60) + time);
 		int lefttime = totaltime - GetTime();
+		
+		char TimeLeft[32];
+		CheckPlayerExpireTime(lefttime, TimeLeft, sizeof(TimeLeft));
 				
-		Format(NameBuffer, sizeof(NameBuffer), "Player Name : %s", sName);
-		Format(AdminNameBuffer, sizeof(AdminNameBuffer), "Admin Name : %s", sAdminName);
+		Format(NameBuffer, sizeof(NameBuffer), "Player : %s", sName);
+		Format(AdminNameBuffer, sizeof(AdminNameBuffer), "Admin : %s (%s)", sAdminName, AdminSteamID);
 		Format(ReasonBuffer, sizeof(ReasonBuffer), "Reason : %s", sReason);
-		Format(DateBuffer, sizeof(DateBuffer), "Date : %s", date);
-		Format(MapBuffer, sizeof(MapBuffer), "On Map : %s", sCurrentMap);
-		Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire Time Left: %d", lefttime);
+		Format(DateBuffer, sizeof(DateBuffer), "Issued : %s", date);
+		Format(MapBuffer, sizeof(MapBuffer), "Map : %s", sCurrentMap);
+		if(StrEqual(sLengthEx, "Permanent"))
+			Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire : Never");
+		else
+			Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire in: %s", TimeLeft);
 				
-		menu.AddItem(sBuffer, "Knife UnBan", CheckKnifeBanAuthor(client, sSteamID, SteamID) ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
 		menu.AddItem("", NameBuffer, ITEMDRAW_DISABLED);
 		menu.AddItem("", AdminNameBuffer, ITEMDRAW_DISABLED);
-		menu.AddItem("", ReasonBuffer, ITEMDRAW_DISABLED);
 		menu.AddItem("", LengthBuffer, ITEMDRAW_DISABLED);
 		menu.AddItem("", DateBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", TimeLeftBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", ReasonBuffer, ITEMDRAW_DISABLED);
 		menu.AddItem("", MapBuffer, ITEMDRAW_DISABLED);
-		if(!StrEqual(sLengthEx, "Permanent"))
-		{
-			menu.AddItem("", TimeLeftBuffer, ITEMDRAW_DISABLED);
-		}
+		menu.AddItem(sBuffer, "Knife UnBan", CheckKnifeBanAuthor(client, sSteamID, SteamID) ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
 	}
 	else
 	{
-		menu.AddItem(sBuffer, "Knife UnBan");
-		menu.AddItem("", "Length : Session", ITEMDRAW_DISABLED);
+		//menu.AddItem("", NameBuffer, ITEMDRAW_DISABLED);
+		//menu.AddItem("", AdminNameBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", "Duration : Session", ITEMDRAW_DISABLED);
 		menu.AddItem("", "Map : Current Map", ITEMDRAW_DISABLED);
+		//menu.AddItem("", DateBuffer, ITEMDRAW_DISABLED);
+		//menu.AddItem("", ReasonBuffer, ITEMDRAW_DISABLED);
+		//menu.AddItem("", MapBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem(sBuffer, "Knife UnBan");
 	}
 	
 	delete Kv;
 	
 	menu.ExitBackButton = true;
-	menu.Display(client, 32);
+	menu.Display(client, MENU_TIME_FOREVER);
 }
 
 stock void DisplayCheckKnifeBanMenu(int client)
@@ -1369,51 +1392,54 @@ stock void DisplayCheckKnifeBanMenu(int client)
 	char SteamID[32];
 	GetClientAuthId(client, AuthId_Steam2, SteamID, sizeof(SteamID));
 	
-	char sName[MAX_NAME_LENGTH], sAdminName[MAX_NAME_LENGTH], sReason[128], date[32], sCurrentMap[PLATFORM_MAX_PATH], sLengthEx[64];
-	char NameBuffer[MAX_NAME_LENGTH+64], AdminNameBuffer[MAX_NAME_LENGTH+64], ReasonBuffer[150], LengthBuffer[20], DateBuffer[32], MapBuffer[PLATFORM_MAX_PATH+64], TimeLeftBuffer[64];
+	char sName[MAX_NAME_LENGTH], sAdminName[MAX_NAME_LENGTH], AdminSteamID[32], sReason[128], date[128], sCurrentMap[PLATFORM_MAX_PATH], sLengthEx[64];
+	char NameBuffer[MAX_NAME_LENGTH+64], AdminNameBuffer[MAX_NAME_LENGTH+64], ReasonBuffer[150], LengthBuffer[64], DateBuffer[160], MapBuffer[PLATFORM_MAX_PATH+64], TimeLeftBuffer[64];
 		
-	int lefttime, ilength;
+	int ilength;
 	
 	CreateKv();
 	if(Kv.JumpToKey(SteamID))
 	{
 		Kv.GetString("Name", sName, sizeof(sName));
 		Kv.GetString("Admin Name", sAdminName, sizeof(sAdminName));
+		Kv.GetString("AdminSteamID", AdminSteamID, sizeof(AdminSteamID));
 		Kv.GetString("Reason", sReason, sizeof(sReason));
 		Kv.GetString("Date", date, sizeof(date));
 		Kv.GetString("Map", sCurrentMap, sizeof(sCurrentMap));
-		int time = Kv.GetNum("TimeStamp");
 		Kv.GetString("LengthEx", sLengthEx, sizeof(sLengthEx));
 		if(StrEqual(sLengthEx, "Permanent"))
-		{
-			Format(LengthBuffer, sizeof(LengthBuffer), "Length : Permanent");
-		}
+			Format(LengthBuffer, sizeof(LengthBuffer), "Duration : Permanent");
 		else
 		{
 			ilength = Kv.GetNum("Length");
-			Format(LengthBuffer, sizeof(LengthBuffer), "Length : %d minutes", ilength);
+			Format(LengthBuffer, sizeof(LengthBuffer), "Duration : %d Minutes", ilength);
 		}
 
-		int totaltime = ((ilength * 60) + time);
-		lefttime = totaltime - GetTime();
-	}
-	
-	Format(NameBuffer, sizeof(NameBuffer), "Player Name : %s", sName);
-	Format(AdminNameBuffer, sizeof(AdminNameBuffer), "Admin Name : %s", sAdminName);
-	Format(ReasonBuffer, sizeof(ReasonBuffer), "Reason : %s", sReason);
-	Format(DateBuffer, sizeof(DateBuffer), "Date : %s", date);
-	Format(MapBuffer, sizeof(MapBuffer), "On Map : %s", sCurrentMap);
-	Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire Time Left: %d", lefttime);
-	
-	menu.AddItem("", NameBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", AdminNameBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", ReasonBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", LengthBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", DateBuffer, ITEMDRAW_DISABLED);
-	menu.AddItem("", MapBuffer, ITEMDRAW_DISABLED);	
-	if(!StrEqual(sLengthEx, "Permanent"))
-	{
+		int time = Kv.GetNum("TimeStamp");
+		int length = Kv.GetNum("Length");
+		int totaltime = ((length * 60) + time);
+		int lefttime = totaltime - GetTime();
+		
+		char TimeLeft[32];
+		CheckPlayerExpireTime(lefttime, TimeLeft, sizeof(TimeLeft));
+
+		Format(NameBuffer, sizeof(NameBuffer), "Player : %s", sName);
+		Format(AdminNameBuffer, sizeof(AdminNameBuffer), "Admin : %s (%s)", sAdminName, AdminSteamID);
+		Format(ReasonBuffer, sizeof(ReasonBuffer), "Reason : %s", sReason);
+		Format(DateBuffer, sizeof(DateBuffer), "Issued : %s", date);
+		Format(MapBuffer, sizeof(MapBuffer), "Map : %s", sCurrentMap);
+		if(StrEqual(sLengthEx, "Permanent"))
+			Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire : Never");
+		else
+			Format(TimeLeftBuffer, sizeof(TimeLeftBuffer), "Expire in: %s", TimeLeft);
+		
+		menu.AddItem("", NameBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", AdminNameBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", LengthBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", DateBuffer, ITEMDRAW_DISABLED);
 		menu.AddItem("", TimeLeftBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", ReasonBuffer, ITEMDRAW_DISABLED);
+		menu.AddItem("", MapBuffer, ITEMDRAW_DISABLED);
 	}
 	
 	menu.ExitButton = true;
@@ -1438,8 +1464,8 @@ stock void KnifeBanClient(int client, int target, int time = 0, const char[] rea
 				
 	if(time >= 1)
 	{
-		CPrintToChatAll("%s{green}%N has knife banned {yellow}%N {white}for %d minutes{yellow} (reason {yellow}%s{white}).", PLUGIN_PREFIX, client, target, time, reason);
-		LogAction(client, target, "[Knife Ban] \"%L\" has knife banned \"%L\" for \"%d\" minutes (reason \"%s\")", client, target, time, reason);
+		CPrintToChatAll("%s{white}%N {red}Knife banned {white}%N {red}%d minutes. \n%s Reason: %s.", PLUGIN_PREFIX, client, target, time, PLUGIN_PREFIX, reason);
+		LogAction(client, target, "[Knife Ban] \"%L\" has knife banned \"%L\" for \"%d\" minutes (reason: \"%s\")", client, target, time, reason);
 		DataPack datapack = new DataPack();
 		g_hKnifeBanExpireTime[target] = CreateDataTimer((1.0 * time * 60), KnifeBan_ExpireTimerOnline, datapack);
 		datapack.WriteCell(target);
@@ -1447,22 +1473,22 @@ stock void KnifeBanClient(int client, int target, int time = 0, const char[] rea
 	}
 	else if(time < 0)
 	{
-		CPrintToChatAll("%s{green}%N has temporarily knife banned {yellow}%N {white}(reason {yellow}%s{white}).", PLUGIN_PREFIX, client, target, reason);
+		CPrintToChatAll("%s {white}%N {red}Temporarily knife banned {white}%N. \n%s Reason: %s.", PLUGIN_PREFIX, client, target, PLUGIN_PREFIX, reason);
 		g_bIsClientKnifeBanned[target] = true;
-		LogAction(client, target, "[Knife Ban] \"%L\" has temporarily knife banned \"%L\" (reason \"%s\")", client, target, reason);
+		LogAction(client, target, "[Knife Ban] \"%L\" has temporarily knife banned \"%L\" (reason: \"%s\")", client, target, reason);
 		return;
 	}
 	else if(time == 0)
 	{
-		CPrintToChatAll("%s{green}%N has permanently knife banned {yellow}%N {white}(reason {yellow}%s{white}).", PLUGIN_PREFIX, client, target, reason);
-		LogAction(client, target, "[Knife Ban] \"%L\" has Permanently knife banned \"%L\" (reason \"%s\")", client, target, reason);
+		CPrintToChatAll("%s {white}%N {red}Permanently knife banned {white}%N. \n%s Reason: %s.", PLUGIN_PREFIX, client, target, PLUGIN_PREFIX, reason);
+		LogAction(client, target, "[Knife Ban] \"%L\" has Permanently knife banned \"%L\" (reason: \"%s\")", client, target, reason);
 	}
 	
 	g_bIsClientKnifeBanned[target] = true;
 	GetClientAuthId(target, AuthId_Steam2, SteamID, sizeof(SteamID));
 	GetClientName(target, sName, sizeof(sName));
 	GetClientName(client, sAdminName, sizeof(sAdminName));
-	FormatTime(date, sizeof(date), "%A %d %B %G @ %r", GetTime());
+	FormatTime(date, sizeof(date), "%d/%m/%y @ %r", GetTime());
 	GetCurrentMap(sCurrentMap, sizeof(sCurrentMap));
 
 	AddPlayerToCFG(SteamID, AdminSteamID, sName, sAdminName, reason, date, sCurrentMap, time);
@@ -1480,7 +1506,7 @@ public Action KnifeBan_ExpireTimerOnline(Handle timer, DataPack datapack)
 		g_bIsClientKnifeBanned[client] = false;
 		g_hKnifeBanExpireTime[client] = null;
 		DeletePlayerFromCFG(SteamID);
-		CPrintToChat(client, "%sYour knife ban has expired.", PLUGIN_PREFIX);
+		CPrintToChat(client, "%s {white}Your Knife ban has {green}expired.", PLUGIN_PREFIX);
 	}
 	
 	return Plugin_Continue;
@@ -1543,6 +1569,25 @@ stock void CreateKv()
 	Kv.ImportFromFile(sPath);
 }
 
+stock void CheckPlayerExpireTime(int lefttime, char[] TimeLeft, int maxlength)
+{
+	if(lefttime > -1)
+	{
+		if(lefttime < 60) // 60 secs
+			Format(TimeLeft, maxlength, "%02i Seconds", lefttime);
+		else if(lefttime > 3600 && lefttime <= 3660) // 1 Hour
+			Format(TimeLeft, maxlength, "%i Hour %02i Minutes", lefttime / 3600, (lefttime / 60) % 60);
+		else if(lefttime > 3660 && lefttime < 86400) // 2 Hours or more
+			Format(TimeLeft, maxlength, "%i Hours %02i Minutes", lefttime / 3600, (lefttime / 60) % 60);
+		else if(lefttime > 86400 && lefttime <= 172800) // 1 Day
+			Format(TimeLeft, maxlength, "%i Day and %02i Hours", lefttime / 86400, (lefttime / 3600) % 24);
+		else if(lefttime > 172800) // 2 Days or more
+			Format(TimeLeft, maxlength, "%i Days and %02i Hours", lefttime / 86400, (lefttime / 3600) % 24);
+		else // Less than 1 Hour
+			Format(TimeLeft, maxlength, "%i Minutes and %02i Seconds", lefttime / 60, lefttime % 60);
+	}
+}
+
 stock int GetCurrentKnifeBannedPlayers()
 {
 	int count = 0;
@@ -1597,7 +1642,7 @@ stock int GetAdminOwnKnifeBans(int client, const char[] sSteamID)
 
 stock bool CheckKnifeBanAuthor(int client, const char[] buffer, const char[] sSteamID)
 {
-	if(CheckCommandAccess(client, "sm_somalia", ADMFLAG_RCON, true))
+	if(CheckCommandAccess(client, "sm_koban", ADMFLAG_RCON, true))
 		return true;
 	
 	char AdminSteamID[32];
